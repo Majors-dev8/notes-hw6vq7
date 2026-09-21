@@ -24,10 +24,15 @@
     "- freebet : true si le pari est marqué pari gratuit, freebet, mise offerte ou équivalent.",
     "- statut : 'en_cours' si le pari n'est pas encore réglé, sinon 'gagne', 'perdu', 'rembourse' ou 'cashout'.",
     "- date au format AAAA-MM-JJ si elle est lisible, sinon null.",
+    "- numero : la référence du pari. Betclic, Winamax et PMU l'affichent toujours,",
+    "  en petits caractères, souvent en haut ou en bas du ticket, parfois près de la date",
+    "  (« N° de pari », « Référence », « Ticket », « ID », « Code »). Cherche-la attentivement",
+    "  et recopie-la caractère par caractère, tirets compris, sans rien ajouter.",
+    "  Mets null seulement si elle est vraiment absente ou illisible : ne l'invente jamais.",
     "- N'invente aucune sélection qui ne figure pas sur l'image.",
     "",
     "Réponds UNIQUEMENT par un objet JSON de cette forme :",
-    '{"paris":[{"plateforme":"betclic|winamax|pmu|autre","type":"simple|combine|systeme",',
+    '{"paris":[{"numero":"A1B2C3 ou null","plateforme":"betclic|winamax|pmu|autre","type":"simple|combine|systeme",',
     '"systeme":"2/4 ou null","mise":10.0,"cote_totale":4.85,"gain_potentiel":48.5,',
     '"freebet":false,"date":"2026-09-21","statut":"en_cours","gain_reel":null,',
     '"selections":[{"sport":"Football","competition":"Ligue 1","evenement":"Lens - Lyon",',
@@ -42,6 +47,7 @@
         items: {
           type: 'object',
           properties: {
+            numero: { type: 'string', nullable: true },
             plateforme: { type: 'string' },
             type: { type: 'string' },
             systeme: { type: 'string', nullable: true },
@@ -267,6 +273,8 @@
       bet.source = 'ocr';
       bet.sourceName = sourceName || '';
       bet.platform = mapPlatform(p.plateforme || p.platform);
+      bet.ref = String(p.numero || p.reference || p.ref || '').trim();
+      if (/^(null|none|n\/a|aucun)$/i.test(bet.ref)) bet.ref = '';
       bet.freebet = !!(p.freebet || p.pari_gratuit);
       bet.stake = Model.num(p.mise !== undefined ? p.mise : p.stake, null);
       bet.oddsTotal = Model.num(p.cote_totale !== undefined ? p.cote_totale : p.odds, null);

@@ -153,9 +153,10 @@
     <button type="button" class="chip on" id="stats-range">30 j</button>
   </header>
   <div class="tabs" id="stats-tabs">
-    <button type="button" data-tab="overview" aria-selected="true">Vue d'ensemble</button>
+    <button type="button" data-tab="overview" aria-selected="true">Bilan</button>
     <button type="button" data-tab="sports" aria-selected="false">Sports</button>
     <button type="button" data-tab="odds" aria-selected="false">Cotes</button>
+    <button type="button" data-tab="leaks" aria-selected="false">Fuites</button>
   </div>
   <div id="stats-body"></div>
 </section>
@@ -207,6 +208,17 @@
       <button type="button" class="switch" role="switch" id="opt-freebet" aria-checked="true" aria-label="Exclure les freebets du ROI"><span></span></button>
     </div>
     <div class="opt-row">
+      <span class="mid"><span class="t1">Afficher en unités</span><span class="t2">Les montants deviennent des unités, comme chez les pronostiqueurs</span></span>
+      <button type="button" class="switch" role="switch" id="opt-units" aria-checked="false" aria-label="Afficher en unités"><span></span></button>
+    </div>
+    <div class="opt-row hidden" id="unit-value-row">
+      <span class="mid" style="flex:1 1 auto">
+        <label for="unit-value" class="t1" style="display:block">Valeur d'une unité</label>
+        <span class="t2">En euros. Souvent 1 % à 2 % de ta bankroll.</span>
+      </span>
+      <input id="unit-value" type="text" inputmode="decimal" style="flex:0 0 92px;margin:0;min-height:44px;padding:0 10px;border-radius:12px;border:1px solid var(--border-2);background:var(--surface-2);color:var(--text);font-family:var(--font-num);font-size:15px;font-weight:600;text-align:right">
+    </div>
+    <div class="opt-row">
       <span class="mid"><span class="t1">Masquer les montants</span><span class="t2">Remplace les sommes par des points</span></span>
       <button type="button" class="switch" role="switch" id="opt-privacy" aria-checked="false" aria-label="Masquer les montants"><span></span></button>
     </div>
@@ -251,6 +263,17 @@
     <span>Réglages</span>
   </a>
 </nav>
+
+<button type="button" id="jobbar" aria-live="polite">
+  <span class="spinner" id="job-spin" aria-hidden="true"></span>
+  <span class="mid">
+    <span class="t1" id="job-title">Lecture de la capture…</span>
+    <span class="t2" id="job-sub">Tu peux continuer à naviguer</span>
+  </span>
+  <span class="go hidden" id="job-go">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5.5 15.5 12 9 18.5"/></svg>
+  </span>
+</button>
 
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="sheet-host"></div>

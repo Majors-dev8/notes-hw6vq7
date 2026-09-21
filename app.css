@@ -364,6 +364,38 @@ nav.tabbar a.fab i {
 .actionbar > * { flex: 1 1 auto; }
 .actionbar > .narrow { flex: 0 0 116px; }
 
+/* ---------- Bandeau de lecture en cours ---------- */
+
+#jobbar {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--nav-h) + var(--safe-b) + 10px);
+  width: calc(100% - 32px); max-width: 528px;
+  box-sizing: border-box;
+  display: none; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 16px;
+  background: var(--surface-3); border: 1px solid var(--border-2);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
+  z-index: 70; cursor: pointer; text-align: left;
+  color: var(--text); font-family: var(--font);
+  animation: fade .2s ease;
+}
+#jobbar.show { display: flex; }
+#jobbar.ready { border-color: var(--green-border); background: #16221E; }
+#jobbar .mid { flex: 1 1 auto; min-width: 0; }
+#jobbar .t1 { display: block; font-size: 13px; font-weight: 800; }
+#jobbar .t2 { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+#jobbar .go { flex: 0 0 auto; color: var(--green); display: flex; }
+
+.spinner {
+  width: 20px; height: 20px; flex: 0 0 auto; border-radius: 999px;
+  border: 2.5px solid rgba(255, 255, 255, .16);
+  border-top-color: var(--green);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+body.has-job #toast { bottom: calc(var(--nav-h) + var(--safe-b) + 76px); }
+
 /* ---------- Toast et modale ---------- */
 
 #toast {

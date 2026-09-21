@@ -15,7 +15,8 @@
     batch: [],          // paris en cours de vérification / saisie
     batchMode: 'ocr',   // ocr | manual | edit
     detailId: null,
-    lastPreview: null
+    lastPreview: null,
+    job: null          // lecture de capture en cours ou prête à vérifier
   };
 
   var SPORTS = ['Football', 'Basket', 'Tennis', 'Rugby', 'Hockey', 'Handball',
@@ -54,6 +55,9 @@
     });
     var hideNav = (name === 'review' || name === 'detail');
     document.getElementById('tabbar').classList.toggle('hidden', hideNav);
+    /* pendant la vérification, le bandeau ferait doublon avec la barre d'action */
+    var bar = document.getElementById('jobbar');
+    if (bar) bar.style.display = (name === 'review' && state.job && state.job.ready) ? 'none' : '';
 
     window.scrollTo(0, 0);
     render();
@@ -69,6 +73,40 @@
       case 'detail': renderDetail(); break;
       case 'import': renderImport(); break;
     }
+  }
+
+  /* =========================================================
+     Bandeau de lecture : la lecture continue quand on navigue,
+     encore faut-il le voir.
+     ========================================================= */
+
+  function setJob(job) {
+    state.job = job;
+    var bar = document.getElementById('jobbar');
+    if (!job) {
+      bar.classList.remove('show', 'ready');
+      document.body.classList.remove('has-job');
+      return;
+    }
+    document.getElementById('job-title').textContent = job.title;
+    document.getElementById('job-sub').textContent = job.sub || '';
+    document.getElementById('job-spin').classList.toggle('hidden', !!job.ready);
+    document.getElementById('job-go').classList.toggle('hidden', !job.ready);
+    bar.classList.toggle('ready', !!job.ready);
+    bar.classList.add('show');
+    document.body.classList.add('has-job');
+  }
+
+  /* Fermer l'onglet pendant une lecture la perd vraiment : on prévient. */
+  function guardUnload(e) {
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  }
+
+  function holdPage(on) {
+    window.removeEventListener('beforeunload', guardUnload);
+    if (on) window.addEventListener('beforeunload', guardUnload);
   }
 
   /* =========================================================
@@ -152,12 +190,22 @@
     var collected = [];
     var errors = [];
 
+    holdPage(true);
+    setJob({
+      title: list.length > 1 ? 'Lecture de ' + list.length + ' captures…' : 'Lecture de la capture…',
+      sub: 'Tu peux continuer à naviguer'
+    });
+
     var chain = list.reduce(function (p, file, i) {
       return p.then(function () {
-        document.getElementById('ocr-step').textContent =
-          list.length > 1 ? 'Capture ' + (i + 1) + ' sur ' + list.length + '…' : 'Lecture par le modèle…';
+        var head = list.length > 1 ? 'Capture ' + (i + 1) + ' sur ' + list.length + '…' : 'Lecture par le modèle…';
+        document.getElementById('ocr-step').textContent = head;
+        if (state.job && !state.job.ready) {
+          setJob({ title: head, sub: 'Tu peux continuer à naviguer' });
+        }
         return AI.readScreenshot(file, function (step) {
           document.getElementById('ocr-step').textContent = step;
+          if (state.job && !state.job.ready) setJob({ title: step, sub: 'Tu peux continuer à naviguer' });
         }).then(function (res) {
           collected = collected.concat(res.bets);
           state.lastPreview = res.preview;
@@ -170,14 +218,53 @@
     chain.then(function () {
       URL.revokeObjectURL(tUrl);
       prog.classList.add('hidden');
+      holdPage(false);
+
       if (!collected.length) {
+        setJob(null);
         err.innerHTML = icon('alert', 17) + '<p>' + esc(errors[0] || "Aucun pari reconnu.") + '</p>';
         err.classList.remove('hidden'); err.style.display = 'flex';
+        if (state.screen !== 'import') UI.toast(errors[0] || 'Aucun pari reconnu.', 'err');
         return;
       }
       if (errors.length) UI.toast(errors.length + ' capture(s) non lue(s).', 'err');
-      openEditor(collected, 'ocr');
+
+      var bets = collected.map(markKnown);
+
+      /* si l'écran d'import est toujours affiché, on enchaîne directement ;
+         sinon on garde le résultat sous la main sans interrompre l'utilisateur */
+      if (state.screen === 'import') {
+        setJob(null);
+        openEditor(bets, 'ocr');
+      } else {
+        var nUp = bets.filter(function (b) { return b._update; }).length;
+        setJob({
+          ready: true,
+          pending: bets,
+          title: bets.length > 1 ? bets.length + ' paris détectés' : '1 pari détecté',
+          sub: nUp ? 'dont ' + nUp + ' déjà enregistré' + (nUp > 1 ? 's' : '') + ' · appuie pour vérifier'
+                   : 'Appuie pour vérifier et enregistrer'
+        });
+        UI.toast(bets.length > 1 ? bets.length + ' paris prêts à vérifier.' : 'Pari prêt à vérifier.');
+      }
     });
+  }
+
+  /* Le numéro lu sur le ticket sert de clé : si le pari est déjà enregistré,
+     la capture ne crée pas de doublon, elle met à jour ce qu'on avait. */
+  function markKnown(bet) {
+    var known = Store.findByRef(bet.platform, bet.ref);
+    if (!known) return bet;
+    var merged = Model.mergeCapture(known, bet);
+    merged.bet._update = {
+      id: known.id,
+      before: known.status,
+      after: merged.bet.status,
+      changes: merged.changes,
+      ref: known.ref,
+      date: known.date
+    };
+    return merged.bet;
   }
 
   /* =========================================================
@@ -200,18 +287,77 @@
     body.innerHTML =
       (state.batchMode === 'ocr'
         ? '<div class="card note" style="margin-bottom:10px">' + icon('info', 17) +
-          '<p>Tout est pré-rempli. Vérifie ce qui est signalé en orange, puis enregistre.</p></div>'
+          '<p>' + (state.batch.some(function (b) { return b._update; })
+            ? 'Certains paris étaient déjà enregistrés : leur numéro a été reconnu, seul leur statut change.'
+            : 'Tout est pré-rempli. Vérifie ce qui est signalé en orange, puis enregistre.') +
+          '</p></div>'
         : '') +
       state.batch.map(editorCard).join('');
 
+    var nUp = state.batch.filter(function (b) { return b._update; }).length;
+    var nNew = state.batch.length - nUp;
+    var label;
+    if (state.batchMode === 'edit') label = 'Enregistrer';
+    else if (nUp && !nNew) label = nUp > 1 ? 'Appliquer les ' + nUp + ' mises à jour' : 'Appliquer la mise à jour';
+    else if (nUp) label = 'Enregistrer et mettre à jour';
+    else label = multi ? 'Enregistrer les ' + nNew : 'Enregistrer';
+
     document.getElementById('review-bar').innerHTML =
       '<button type="button" class="btn ghost narrow" id="rev-cancel">Annuler</button>' +
-      '<button type="button" class="btn" id="rev-save">' +
-        (state.batchMode === 'edit' ? 'Enregistrer' : (multi ? 'Enregistrer les ' + state.batch.length : 'Enregistrer')) +
-      '</button>';
+      '<button type="button" class="btn" id="rev-save">' + esc(label) + '</button>';
   }
 
   function editorCard(bet, idx) {
+    if (bet._update) return updateCard(bet, idx);
+    return fullEditorCard(bet, idx);
+  }
+
+  /* Un pari déjà connu n'a pas besoin d'être ressaisi : on montre seulement
+     ce que la nouvelle capture change. */
+  function updateCard(bet, idx) {
+    var u = bet._update;
+    var nothing = !u.changes.length;
+
+    var h = '<section class="card' + (nothing ? '' : ' green') + '" data-idx="' + idx + '" style="margin-top:10px">';
+    h += '<div class="row-between" style="margin-bottom:12px">' +
+      '<span style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:.06em;color:' +
+      (nothing ? 'var(--muted)' : 'var(--green)') + '">' + icon(nothing ? 'info' : 'check', 14, 2.6) +
+      (nothing ? 'DÉJÀ À JOUR' : 'MISE À JOUR') + '</span>' +
+      '<button type="button" class="del-btn" data-act="drop">' + icon('trash', 17, 1.8) + '</button>' +
+      '</div>';
+
+    h += '<div style="display:flex;gap:12px;align-items:center">' +
+      '<span class="badge ' + esc(bet.platform) + '">' + esc(Model.platformLabel(bet.platform).charAt(0)) + '</span>' +
+      '<span style="flex:1 1 auto;min-width:0">' +
+        '<span style="display:block;font-size:14px;font-weight:700">' + esc(Model.typeLabel(bet)) + '</span>' +
+        '<span style="display:block;font-size:12px;color:var(--muted);margin-top:3px">n° ' + esc(u.ref) +
+          ' · enregistré le ' + esc(Model.fmtDate(u.date)) + '</span>' +
+      '</span></div>';
+
+    if (nothing) {
+      h += '<p style="margin:14px 0 0;font-size:12.5px;color:var(--muted);line-height:1.55">' +
+        'Ce pari est déjà enregistré et la capture n\'apporte rien de nouveau. ' +
+        'Tu peux l\'ignorer sans rien perdre.</p>';
+    } else {
+      h += '<div style="display:flex;align-items:center;gap:10px;margin-top:14px">' +
+        '<span class="pill ' + esc(u.before) + '">' + esc(Model.STATUS_LABEL[u.before]) + '</span>' +
+        '<span style="color:var(--muted)">' + icon('chevron', 15, 2.2) + '</span>' +
+        '<span class="pill ' + esc(u.after) + '">' + esc(Model.STATUS_LABEL[u.after]) + '</span>' +
+        '<span style="flex:1 1 auto"></span>' +
+        '<span class="num" style="font-size:15px;font-weight:700;color:' +
+        (Model.profit(bet) > 0 ? 'var(--green)' : (Model.profit(bet) < 0 ? 'var(--red)' : 'var(--text)')) + '">' +
+        esc(bet.status === 'pending' ? '' : Model.fmtEur(Model.profit(bet), { signed: true })) + '</span>' +
+        '</div>';
+
+      h += '<ul style="margin:14px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-2);line-height:1.7">' +
+        u.changes.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>';
+    }
+
+    h += '</section>';
+    return h;
+  }
+
+  function fullEditorCard(bet, idx) {
     var issues = Model.checkConsistency(bet);
     var o = Model.outcome(bet);
     var expected = Model.num(bet.stake, 0) && Model.num(bet.oddsTotal, 0)
@@ -258,9 +404,14 @@
       esc(fmtInput(bet.oddsTotal)) + '"></div>' +
       '</div>';
 
-    /* date */
-    h += '<div class="field"><label for="dt' + idx + '">DATE</label>' +
-      '<input id="dt' + idx + '" type="date" data-field="date" value="' + esc(bet.date || '') + '"></div>';
+    /* date et numéro du ticket */
+    h += '<div class="two" style="margin-top:14px">' +
+      '<div class="field" style="margin:0"><label for="dt' + idx + '">DATE</label>' +
+      '<input id="dt' + idx + '" type="date" data-field="date" value="' + esc(bet.date || '') + '"></div>' +
+      '<div class="field" style="margin:0"><label for="rf' + idx + '">N° DE PARI</label>' +
+      '<input id="rf' + idx + '" type="text" data-field="ref" placeholder="facultatif" ' +
+      'style="font-size:14px" value="' + esc(bet.ref || '') + '"></div>' +
+      '</div>';
 
     /* freebet */
     h += '<div class="opt-row" style="padding:12px 0 0">' +
@@ -517,7 +668,8 @@
     document.getElementById('detail-sub').textContent =
       Model.platformLabel(bet.platform) + ' · ' + Model.fmtDate(bet.date) +
       (bet.type === 'systeme' ? ' · ' + Model.comboCount(bet) + ' combis' : '') +
-      (bet.freebet ? ' · freebet' : '');
+      (bet.freebet ? ' · freebet' : '') +
+      (bet.ref ? ' · n° ' + bet.ref : '');
     var pill = document.getElementById('detail-status');
     pill.className = 'pill ' + st;
     pill.textContent = Model.STATUS_LABEL[st] || st;
@@ -582,6 +734,11 @@
     if (bet.manual) {
       h += '<div class="card note amber" style="margin-top:10px">' + icon('info', 17) +
         '<p>Ce pari a été réglé à la main. <button type="button" id="reopen" style="background:none;border:none;color:var(--amber);font-weight:800;text-decoration:underline;cursor:pointer;padding:0;font-size:12.5px">Revenir au calcul automatique</button></p></div>';
+    }
+
+    if (bet.updatedAt) {
+      h += '<div class="card tight" style="margin-top:10px"><p style="margin:0;font-size:11.5px;color:var(--muted)">' +
+        'Statut mis à jour depuis une capture le ' + esc(Model.fmtDate(bet.updatedAt)) + '.</p></div>';
     }
 
     if (bet.note) {
@@ -785,30 +942,22 @@
         '<div style="font-size:12px;color:var(--muted);font-weight:700">Par type de pari</div>' +
         UI.bars(Stats.byType(list, xf), 'profit') + '</section>';
 
-      var nm = Stats.nearMisses(list);
-      if (nm.count) {
-        h += '<section class="card amber" style="margin-top:10px;display:flex;gap:12px;align-items:center">' +
-          '<span style="width:40px;height:40px;flex:0 0 auto;border-radius:14px;background:var(--amber-dim);color:var(--amber);' +
-          'display:flex;align-items:center;justify-content:center;font-family:var(--font-num);font-size:17px;font-weight:700">' +
-          nm.count + '</span>' +
-          '<span style="flex:1 1 auto;min-width:0">' +
-          '<span style="display:block;font-size:13px;font-weight:800">Combinés perdus à une sélection près</span>' +
-          '<span style="display:block;font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.5">' +
-          esc(Model.fmtEur(nm.missed)) + ' de gains manqués' +
-          (nm.worst ? ' · « ' + esc(nm.worst.market) +' » revient ' + nm.worst.n + ' fois' : '') +
-          '</span></span></section>';
-      }
-
       var sk = Stats.streaks(list);
+      var dd = Stats.maxDrawdown(list);
       h += '<div class="tiles" style="margin-bottom:0">' +
         tile('Série en cours', (sk.current || 0) + (sk.currentKind === 'won' ? ' gagnés' : (sk.currentKind ? ' perdus' : '')),
              sk.currentKind === 'won' ? 'pos' : (sk.currentKind === 'lost' ? 'neg' : '')) +
         tile('Meilleure série', sk.best + ' gagnés', 'pos') +
+        tile('Pire creux traversé', Model.fmtEur(-dd.worst), dd.worst ? 'neg' : '') +
+        tile('Sous le dernier sommet', Model.fmtEur(-dd.current), dd.current ? 'neg' : '') +
         '</div>';
 
       h += '<section class="card" style="margin-top:10px">' +
         '<div style="font-size:12px;color:var(--muted);font-weight:700">35 derniers jours</div>' +
         heatmap(Stats.calendar(list, 35)) + '</section>';
+
+    } else if (state.statsTab === 'leaks') {
+      h += renderLeaks(list, xf);
 
     } else if (state.statsTab === 'sports') {
       h += '<section class="card" style="margin-top:12px">' +
@@ -823,6 +972,110 @@
     }
 
     body.innerHTML = h;
+  }
+
+  /* Onglet Fuites : les analyses qui montrent où part l'argent. */
+  function renderLeaks(list, xf) {
+    var h = '';
+
+    var counts = Stats.bySelectionCount(list, xf);
+    if (counts.length > 1) {
+      h += '<section class="card" style="margin-top:12px">' +
+        '<div style="font-size:12px;color:var(--muted);font-weight:700">Rentabilité selon le nombre de sélections</div>' +
+        UI.bars(counts, 'profit') +
+        selectionCountVerdict(counts) +
+        '</section>';
+      h += tableCard('Détail par nombre de sélections', counts);
+    }
+
+    var nm = Stats.nearMisses(list);
+    if (nm.count) {
+      h += '<section class="card amber" style="margin-top:10px;display:flex;gap:12px;align-items:center">' +
+        '<span style="width:40px;height:40px;flex:0 0 auto;border-radius:14px;background:var(--amber-dim);color:var(--amber);' +
+        'display:flex;align-items:center;justify-content:center;font-family:var(--font-num);font-size:17px;font-weight:700">' +
+        nm.count + '</span>' +
+        '<span style="flex:1 1 auto;min-width:0">' +
+        '<span style="display:block;font-size:13px;font-weight:800">Combinés perdus à une sélection près</span>' +
+        '<span style="display:block;font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.5">' +
+        esc(Model.fmtEur(nm.missed)) + ' de gains manqués' +
+        (nm.worst ? ' · « ' + esc(nm.worst.market) + ' » revient ' + nm.worst.n + ' fois' : '') +
+        '</span></span></section>';
+    }
+
+    var sim = Stats.singlesSimulation(list);
+    if (sim) {
+      var better = sim.diff > 0;
+      h += '<section class="card" style="margin-top:10px">' +
+        '<div style="font-size:12px;color:var(--muted);font-weight:700">Et si tu avais tout joué en simples ?</div>' +
+        '<div style="display:flex;gap:10px;margin-top:12px">' +
+          '<div style="flex:1 1 0"><div style="font-size:11px;color:var(--muted);font-weight:700">En combinés</div>' +
+          '<div class="num ' + (sim.real >= 0 ? 'pos' : 'neg') + '" style="font-size:20px;font-weight:700;margin-top:3px">' +
+          esc(Model.fmtEur(sim.real, { signed: true })) + '</div></div>' +
+          '<div style="flex:1 1 0"><div style="font-size:11px;color:var(--muted);font-weight:700">En simples</div>' +
+          '<div class="num ' + (sim.simulated >= 0 ? 'pos' : 'neg') + '" style="font-size:20px;font-weight:700;margin-top:3px">' +
+          esc(Model.fmtEur(sim.simulated, { signed: true })) + '</div></div>' +
+        '</div>' +
+        '<p style="margin:14px 0 0;font-size:12px;color:var(--text-2);line-height:1.6">' +
+        'Sur ' + sim.count + ' pari' + (sim.count > 1 ? 's' : '') + ' à plusieurs sélections, à risque identique. ' +
+        (better
+          ? 'Les simples auraient rapporté ' + esc(Model.fmtEur(sim.diff)) + ' de plus.'
+          : 'Les combinés ont mieux fonctionné, de ' + esc(Model.fmtEur(-sim.diff)) + '.') +
+        '</p></section>';
+    }
+
+    var al = Stats.afterLoss(list);
+    if (al.sample >= 6 && al.afterWin && al.afterLoss) {
+      var up = al.ratio > 1.15;
+      h += '<section class="card' + (up ? ' amber' : '') + '" style="margin-top:10px">' +
+        '<div style="font-size:12px;color:var(--muted);font-weight:700">Ta mise après une défaite</div>' +
+        '<div style="display:flex;gap:10px;margin-top:12px">' +
+          '<div style="flex:1 1 0"><div style="font-size:11px;color:var(--muted);font-weight:700">Après un gain</div>' +
+          '<div class="num" style="font-size:20px;font-weight:700;margin-top:3px">' + esc(Model.fmtEur(al.afterWin)) + '</div></div>' +
+          '<div style="flex:1 1 0"><div style="font-size:11px;color:var(--muted);font-weight:700">Après une perte</div>' +
+          '<div class="num' + (up ? ' warn' : '') + '" style="font-size:20px;font-weight:700;margin-top:3px">' +
+          esc(Model.fmtEur(al.afterLoss)) + '</div></div>' +
+        '</div>' +
+        '<p style="margin:14px 0 0;font-size:12px;color:var(--text-2);line-height:1.6">' +
+        (up
+          ? 'Tu mises ' + Math.round((al.ratio - 1) * 100) + ' % de plus après avoir perdu. C\'est le schéma classique de la chasse aux pertes : la mise monte au moment où le jugement est le moins clair.'
+          : 'Tes mises restent stables après une défaite. C\'est bon signe : c\'est là que la plupart des parieurs dérapent.') +
+        '</p></section>';
+    }
+
+    if (!h) {
+      h = '<div class="empty"><p>Pas encore assez de paris réglés pour repérer quoi que ce soit.<br>' +
+        'Ces analyses deviennent parlantes à partir d\'une vingtaine de paris.</p></div>';
+    }
+    return h;
+  }
+
+  /* Lecture honnête des chiffres : on décrit ce que dit le tableau,
+     pas ce qu'on croit savoir des parieurs en général. */
+  function selectionCountVerdict(counts) {
+    var courts = { p: 0, s: 0, n: 0 }, longs = { p: 0, s: 0, n: 0 };
+    counts.forEach(function (g) {
+      var k = parseInt(g.key, 10);
+      var t = k <= 2 ? courts : longs;
+      t.p += g.profit; t.s += g.staked; t.n += g.count;
+    });
+    if (courts.n < 5 || longs.n < 5 || !courts.s || !longs.s) {
+      return '<p style="margin:14px 0 0;font-size:11.5px;color:var(--muted);line-height:1.6">' +
+        'Il faut au moins cinq paris de chaque format pour que la comparaison veuille dire quelque chose.</p>';
+    }
+    var rc = (courts.p / courts.s) * 100;
+    var rl = (longs.p / longs.s) * 100;
+    var txt;
+    if (rl < rc - 5) {
+      txt = 'Tes paris à trois sélections et plus rendent ' + Model.fmtPct(rc - rl) +
+            ' de moins que tes paris courts. Chaque ligne ajoutée multiplie le risque plus vite que le gain.';
+    } else if (rl > rc + 5) {
+      txt = 'Tes paris longs rendent ' + Model.fmtPct(rl - rc) + ' de plus que tes paris courts. ' +
+            'Garde en tête que les grosses cotes demandent beaucoup de paris avant que le chiffre se stabilise.';
+    } else {
+      txt = 'Paris courts et paris longs se valent à peu près chez toi, ' +
+            Model.fmtPct(rc, true) + ' contre ' + Model.fmtPct(rl, true) + ' de rendement.';
+    }
+    return '<p style="margin:14px 0 0;font-size:11.5px;color:var(--muted);line-height:1.6">' + esc(txt) + '</p>';
   }
 
   function tile(k, v, cls) {
@@ -880,6 +1133,10 @@
     document.getElementById('quota-today').textContent = Store.quotaToday();
     document.getElementById('opt-freebet').setAttribute('aria-checked', String(!!cfg.excludeFreebets));
     document.getElementById('opt-privacy').setAttribute('aria-checked', String(!!cfg.privacy));
+    document.getElementById('opt-units').setAttribute('aria-checked', String(!!cfg.unitMode));
+    document.getElementById('unit-value-row').classList.toggle('hidden', !cfg.unitMode);
+    var uv = document.getElementById('unit-value');
+    if (document.activeElement !== uv) uv.value = String(cfg.unitValue || 10).replace('.', ',');
     document.getElementById('version-line').textContent =
       'Suivi Paris ' + Store.VERSION + ' · ' + Store.all().length + ' paris enregistrés';
 
@@ -962,6 +1219,14 @@
       var v = this.getAttribute('aria-checked') !== 'true';
       Store.setSetting('excludeFreebets', v);
       renderSettings();
+    });
+    document.getElementById('opt-units').addEventListener('click', function () {
+      Store.setSetting('unitMode', this.getAttribute('aria-checked') !== 'true');
+      renderSettings();
+    });
+    document.getElementById('unit-value').addEventListener('input', function () {
+      var v = Model.num(this.value, 0);
+      if (v > 0) Store.setSetting('unitValue', v);
     });
     document.getElementById('opt-privacy').addEventListener('click', function () {
       var v = this.getAttribute('aria-checked') !== 'true';
@@ -1066,6 +1331,19 @@
      Import : câblage
      ========================================================= */
 
+  function wireJobBar() {
+    document.getElementById('jobbar').addEventListener('click', function () {
+      if (!state.job) return;
+      if (state.job.ready) {
+        var bets = state.job.pending;
+        setJob(null);
+        openEditor(bets, 'ocr');
+      } else {
+        go('#import');
+      }
+    });
+  }
+
   function wireImport() {
     var drop = document.getElementById('drop');
     var file = document.getElementById('file');
@@ -1105,19 +1383,41 @@
   }
 
   function saveBatch() {
+    var updates = state.batch.filter(function (b) { return b._update; });
+    var fresh = state.batch.filter(function (b) { return !b._update; });
+
     var bad = [];
-    state.batch.forEach(function (b, i) {
+    fresh.forEach(function (b, i) {
       if (!Model.num(b.stake, 0)) bad.push(i + 1);
     });
     if (bad.length) {
       UI.toast('Mise manquante sur le pari ' + bad.join(', ') + '.', 'err');
       return;
     }
-    state.batch.forEach(function (b) {
+    fresh.forEach(function (b) {
       delete b.issues;
       b.selections.forEach(function (s) { s.flagged = false; });
       syncOdds(b);
     });
+
+    /* les paris déjà connus sont mis à jour, pas recréés */
+    if (updates.length) {
+      updates.forEach(function (b) {
+        var id = b._update.id;
+        delete b._update;
+        delete b.issues;
+        b.id = id;
+        Store.update(b);
+      });
+      if (!fresh.length) {
+        state.batch = [];
+        UI.toast(updates.length > 1
+          ? updates.length + ' paris mis à jour.'
+          : 'Pari mis à jour.');
+        go('#home');
+        return;
+      }
+    }
 
     if (state.batchMode === 'edit') {
       Store.update(state.batch[0]);
@@ -1126,10 +1426,12 @@
       UI.toast('Modifications enregistrées.');
       go('#detail/' + id);
     } else {
-      Store.addMany(state.batch);
-      var n = state.batch.length;
+      Store.addMany(fresh);
+      var n = fresh.length;
       state.batch = [];
-      UI.toast(n > 1 ? n + ' paris enregistrés.' : 'Pari enregistré.');
+      var msg = (n > 1 ? n + ' paris enregistrés' : 'Pari enregistré');
+      if (updates.length) msg += ', ' + updates.length + ' mis à jour';
+      UI.toast(msg + '.');
       go('#home');
     }
   }
@@ -1163,6 +1465,7 @@
     Store.load();
     wireImport();
     wireReview();
+    wireJobBar();
     wireSettings();
     Store.onChange(function () { if (state.screen === 'home') renderHome(); });
 
