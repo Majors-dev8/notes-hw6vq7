@@ -1,22 +1,22 @@
 /* Service worker — mise en cache de l'application et réception des captures partagées */
 
-var CACHE = 'suivi-paris-v1';
+var CACHE = 'suivi-paris-v2';
 var SHARE_CACHE = 'sp-share';
 
 var ASSETS = [
   './',
   './index.html',
   './app.css',
-  './js/model.js',
-  './js/store.js',
-  './js/stats.js',
-  './js/ai.js',
-  './js/ui.js',
-  './js/app.js',
+  './model.js',
+  './store.js',
+  './stats.js',
+  './ai.js',
+  './ui.js',
+  './app.js',
   './manifest.webmanifest',
-  './icons/icon.svg',
-  './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icon.svg',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
 self.addEventListener('install', function (e) {
