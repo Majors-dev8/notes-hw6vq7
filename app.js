@@ -1151,10 +1151,13 @@
   }
 
   /* première ouverture des réglages avec une clé mais sans modèle : on détecte */
+  /* On n'interroge l'API que si c'est nécessaire : chaque appel compte
+     dans la quinzaine de requêtes par minute du palier gratuit. */
   function maybeAutoDetect() {
     var cfg = Store.getSettings();
-    if (cfg.apiKey && !cfg.model) loadModelList();
-    else if (cfg.apiKey && modelCache) paintModelList(modelCache);
+    if (!cfg.apiKey) return;
+    if (!cfg.model && !cfg.modelOk) loadModelList();
+    else if (modelCache) paintModelList(modelCache);
   }
 
   function wireSettings() {
@@ -1165,6 +1168,8 @@
       st.textContent = 'Clé enregistrée sur cet appareil.';
       st.className = 'hint'; st.style.color = '';
       modelCache = null;
+      Store.setSetting('modelOk', false);
+      Store.setSetting('badModels', []);
       clearTimeout(keyTimer);
       keyTimer = setTimeout(function () {
         if (Store.getSettings().apiKey.length > 20) loadModelList(true);
@@ -1176,6 +1181,8 @@
     document.getElementById('prov-gemini').addEventListener('click', function () {
       Store.setSetting('provider', 'gemini');
       Store.setSetting('model', '');
+      Store.setSetting('modelOk', false);
+      Store.setSetting('badModels', []);
       modelCache = null;
       renderSettings();
       loadModelList();
@@ -1183,6 +1190,8 @@
     document.getElementById('prov-openrouter').addEventListener('click', function () {
       Store.setSetting('provider', 'openrouter');
       Store.setSetting('model', '');
+      Store.setSetting('modelOk', false);
+      Store.setSetting('badModels', []);
       modelCache = null;
       renderSettings();
       loadModelList();
@@ -1211,8 +1220,9 @@
       var c = e.target.closest('[data-model]');
       if (!c) return;
       Store.setSetting('model', c.getAttribute('data-model'));
+      Store.setSetting('modelOk', false);
       renderSettings();
-      loadModelList();
+      paintModelList(modelCache || []);
       UI.toast('Modèle : ' + c.getAttribute('data-model'));
     });
     document.getElementById('opt-freebet').addEventListener('click', function () {
@@ -1293,7 +1303,8 @@
         return;
       }
       paintModelList(ids);
-      if (!Store.getSettings().model) {
+      var st = Store.getSettings();
+      if (!st.model && !st.modelOk) {
         hint.textContent = 'Recherche du modèle qui fonctionne…';
         AI.pickWorkingModel(function (msg) { hint.textContent = msg; }).then(function (r) {
           renderSettings();

@@ -193,6 +193,12 @@
   }
 
   function httpError(res) {
+    var e = buildError(res);
+    e.code = res.status;
+    return e;
+  }
+
+  function buildError(res) {
     var msg = '';
     try {
       var j = JSON.parse(res.text);
@@ -206,7 +212,7 @@
       return new Error("Clé API refusée ou sans accès à ce modèle.");
     }
     if (res.status === 429) {
-      return new Error("Quota atteint pour le moment. Réessaie dans une minute.");
+      return new Error("Limite du palier gratuit atteinte : trop de requêtes en une minute. Patiente un instant.");
     }
     if (res.status === 404) {
       return new Error("Modèle introuvable. Change le nom du modèle dans les réglages.");
@@ -432,16 +438,26 @@
 
   /* Essaie les meilleurs candidats l'un après l'autre et garde le premier qui
      répond vraiment. Un nom bien classé ne garantit pas qu'il fonctionne. */
+  /* Chaque essai coûte une requête, et le palier gratuit en autorise une
+     quinzaine par minute : on retient les modèles déjà écartés et on n'en
+     teste que quelques-uns. */
   function pickWorkingModel(onStep) {
     return listModels().then(function (ids) {
-      var ranked = ids.slice().sort(function (a, b) { return scoreModel(b) - scoreModel(a); }).slice(0, 8);
-      if (!ranked.length) throw new Error("Aucun modèle compatible n'est accessible avec cette clé.");
       var base = Store.getSettings();
+      var bad = base.badModels || [];
+      var ranked = ids.slice()
+        .sort(function (a, b) { return scoreModel(b) - scoreModel(a); })
+        .filter(function (id) { return bad.indexOf(id) < 0; })
+        .slice(0, 4);
+
+      if (!ranked.length) {
+        throw new Error("Aucun modèle compatible n'est accessible avec cette clé. Choisis-en un à la main dans les réglages.");
+      }
       var i = 0, lastErr = null;
 
       function attempt() {
         if (i >= ranked.length) {
-          throw lastErr || new Error("Aucun des modèles de ta clé ne répond. Choisis-en un à la main dans les réglages.");
+          throw lastErr || new Error("Aucun des modèles essayés ne répond. Choisis-en un à la main dans les réglages.");
         }
         var id = ranked[i++];
         if (onStep) onStep('Essai de ' + id + '…');
@@ -450,14 +466,37 @@
         cfg.model = id;
         return pingModel(cfg).then(function () {
           Store.setSetting('model', id);
+          Store.setSetting('modelOk', true);
           return { model: id, models: ids };
         }).catch(function (e) {
+          if (e && e.code === 429) throw e;      /* la limite n'est pas la faute du modèle */
           if (!isUnusableModel(e)) throw e;
+          rememberBadModel(id);
           lastErr = e;
           return attempt();
         });
       }
       return attempt();
+    });
+  }
+
+  function rememberBadModel(id) {
+    var bad = (Store.getSettings().badModels || []).slice();
+    if (bad.indexOf(id) < 0) bad.push(id);
+    Store.setSetting('badModels', bad.slice(-20));
+  }
+
+  /* Attente visible plutôt qu'un échec sec : la limite se libère vite. */
+  function waitFor(sec, onStep) {
+    return new Promise(function (resolve) {
+      var left = sec;
+      function tick() {
+        if (onStep) onStep('Limite atteinte · nouvelle tentative dans ' + left + ' s…');
+        if (left <= 0) return resolve();
+        left--;
+        setTimeout(tick, 1000);
+      }
+      tick();
     });
   }
 
@@ -482,11 +521,18 @@
         if (!isUnusableModel(e) || cfg.provider === 'openrouter') throw e;
         onStep("Modèle indisponible, recherche d'un remplaçant…");
         return autoPickModel(onStep).then(function () { return run(Store.getSettings()); });
+      }).catch(function (e) {
+        if (!e || e.code !== 429) throw e;
+        return waitFor(30, onStep).then(function () {
+          onStep('Nouvelle tentative…');
+          return run(Store.getSettings());
+        });
       });
 
       return p.then(function (txt) {
         onStep('Mise en forme…');
         Store.bumpQuota();
+        if (!cfg.modelOk) Store.setSetting('modelOk', true);
         var bets = toBets(parseJson(txt), file.name);
         if (!bets.length) throw new Error("Aucun pari reconnu sur cette capture. Essaie une image où le ticket est entier.");
         return { bets: bets, preview: img.dataUrl };
@@ -524,6 +570,7 @@
       });
     }
     return pingModel(cfg).then(function () {
+      Store.setSetting('modelOk', true);
       return { switched: false, model: cfg.model };
     }).catch(function (e) {
       if (!isUnusableModel(e)) throw e;
@@ -538,7 +585,7 @@
     testKey: testKey,
     listModels: listModels,
     autoPickModel: autoPickModel,
-    pickWorkingModel: pickWorkingModel,
+    pickWorkingModel: pickWorkingModel, rememberBadModel: rememberBadModel,
     bestModel: bestModel,
     compress: compress,
     toBets: toBets,

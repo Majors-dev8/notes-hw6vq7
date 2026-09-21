@@ -14,6 +14,10 @@
     model: '',
     excludeFreebets: true,
     privacy: false,
+    unitMode: false,
+    unitValue: 10,
+    modelOk: false,
+    badModels: [],
     quotaDay: '',
     quotaCount: 0
   };
@@ -36,6 +40,7 @@
       settings = Object.assign({}, DEFAULT_SETTINGS, safeParse(localStorage.getItem(KEY_SET), {}) || {});
     } catch (e) { settings = Object.assign({}, DEFAULT_SETTINGS); }
     Model.setPrivacy(settings.privacy);
+    Model.setUnits(settings.unitMode, settings.unitValue);
   }
 
   function persist() {
@@ -63,6 +68,16 @@
 
   function get(id) {
     for (var i = 0; i < bets.length; i++) if (bets[i].id === id) return bets[i];
+    return null;
+  }
+
+  /* Retrouve un pari déjà enregistré à partir du numéro lu sur le ticket. */
+  function findByRef(platform, ref) {
+    var key = Model.betKey({ platform: platform, ref: ref });
+    if (!key) return null;
+    for (var i = 0; i < bets.length; i++) {
+      if (Model.betKey(bets[i]) === key) return bets[i];
+    }
     return null;
   }
 
@@ -104,6 +119,9 @@
   function setSetting(key, value) {
     settings[key] = value;
     if (key === 'privacy') Model.setPrivacy(value);
+    if (key === 'unitMode' || key === 'unitValue') {
+      Model.setUnits(settings.unitMode, settings.unitValue);
+    }
     persistSettings();
     emit();
   }
@@ -154,7 +172,7 @@
   }
 
   function exportCsv() {
-    var head = ['date', 'plateforme', 'type', 'selections', 'mise', 'cote', 'freebet',
+    var head = ['date', 'numero', 'plateforme', 'type', 'selections', 'mise', 'cote', 'freebet',
                 'statut', 'retour', 'benefice', 'detail'];
     var rows = [head.join(';')];
     bets.forEach(function (b) {
@@ -163,6 +181,7 @@
       }).join(' | ');
       rows.push([
         b.date || '',
+        b.ref || '',
         Model.platformLabel(b.platform),
         Model.typeLabel(b),
         (b.selections || []).length,
@@ -192,7 +211,7 @@
   global.Store = {
     VERSION: VERSION,
     load: load, onChange: onChange,
-    all: all, get: get, add: add, addMany: addMany, update: update, remove: remove, wipe: wipe,
+    all: all, get: get, findByRef: findByRef, add: add, addMany: addMany, update: update, remove: remove, wipe: wipe,
     getSettings: getSettings, setSetting: setSetting,
     bumpQuota: bumpQuota, quotaToday: quotaToday,
     exportJson: exportJson, importJson: importJson, exportCsv: exportCsv, download: download
