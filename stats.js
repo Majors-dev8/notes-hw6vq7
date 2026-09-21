@@ -202,6 +202,96 @@
     return out;
   }
 
+  /* ---------- répartition par nombre de sélections ---------- */
+
+  function bySelectionCount(bets, xf) {
+    return group(bets, function (b) {
+      var n = (b.selections || []).length;
+      return n >= 5 ? 5 : n;
+    }, function (k) {
+      var n = parseInt(k, 10);
+      if (n === 1) return '1 sélection';
+      if (n >= 5) return '5 et plus';
+      return n + ' sélections';
+    }, xf).sort(function (a, b) { return parseInt(a.key, 10) - parseInt(b.key, 10); });
+  }
+
+  /* ---------- pire creux traversé ---------- */
+
+  /* Le bénéfice final ne dit rien du chemin. Le drawdown mesure la pire
+     descente depuis un sommet : c'est ce qu'il faut pouvoir encaisser. */
+  function maxDrawdown(bets) {
+    var pts = curve(bets);
+    var peak = 0, worst = 0, current = 0;
+    pts.forEach(function (p) {
+      if (p.y > peak) peak = p.y;
+      var dd = peak - p.y;
+      if (dd > worst) worst = dd;
+    });
+    if (pts.length) current = peak - pts[pts.length - 1].y;
+    return { worst: Model.round2(worst), current: Model.round2(current) };
+  }
+
+  /* ---------- mise après une défaite ---------- */
+
+  /* Miser davantage après avoir perdu est le signe le plus courant
+     de la chasse aux pertes. On compare simplement les deux moyennes. */
+  function afterLoss(bets) {
+    var s = settled(bets).slice().sort(function (a, b) {
+      return String(a.date || a.createdAt).localeCompare(String(b.date || b.createdAt));
+    }).filter(function (b) { return b.status === 'won' || b.status === 'lost'; });
+
+    var afterW = [], afterL = [];
+    for (var i = 1; i < s.length; i++) {
+      var stake = Model.num(s[i].stake, 0);
+      if (!stake) continue;
+      (s[i - 1].status === 'lost' ? afterL : afterW).push(stake);
+    }
+    function avg(a) { return a.length ? a.reduce(function (x, y) { return x + y; }, 0) / a.length : null; }
+    var w = avg(afterW), l = avg(afterL);
+    return {
+      afterWin: w === null ? null : Model.round2(w),
+      afterLoss: l === null ? null : Model.round2(l),
+      ratio: (w && l) ? l / w : null,
+      sample: afterW.length + afterL.length
+    };
+  }
+
+  /* ---------- et si tout avait été joué en simples ? ---------- */
+
+  /* Chaque sélection d'un combiné est rejouée seule, la mise du pari étant
+     répartie entre elles : le risque total reste identique. */
+  function singlesSimulation(bets) {
+    var real = 0, sim = 0, count = 0, staked = 0;
+    settled(bets).forEach(function (b) {
+      var sels = b.selections || [];
+      if (b.type === 'simple' || sels.length < 2) return;
+      var stake = Model.num(b.stake, 0);
+      if (!stake) return;
+      if (sels.some(function (x) { return x.status === 'pending'; })) return;
+
+      var unit = stake / sels.length;
+      var got = 0;
+      sels.forEach(function (x) {
+        var o = Model.num(x.odds, 0);
+        if (x.status === 'won' && o) got += unit * (o - 1);
+        else if (x.status === 'lost') got -= unit;
+      });
+      sim += got;
+      real += Model.profit(b);
+      staked += stake;
+      count++;
+    });
+    if (!count) return null;
+    return {
+      count: count,
+      staked: Model.round2(staked),
+      real: Model.round2(real),
+      simulated: Model.round2(sim),
+      diff: Model.round2(sim - real)
+    };
+  }
+
   /* ---------- groupement par jour pour l'historique ---------- */
 
   function byDay(bets) {
@@ -221,6 +311,8 @@
   global.Stats = {
     filter: filter, settled: settled, summary: summary, curve: curve,
     byPlatform: byPlatform, bySport: bySport, byOdds: byOdds, byType: byType,
-    nearMisses: nearMisses, streaks: streaks, calendar: calendar, byDay: byDay
+    nearMisses: nearMisses, streaks: streaks, calendar: calendar, byDay: byDay,
+    bySelectionCount: bySelectionCount, maxDrawdown: maxDrawdown,
+    afterLoss: afterLoss, singlesSimulation: singlesSimulation
   };
 })(window);

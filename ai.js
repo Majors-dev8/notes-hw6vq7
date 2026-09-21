@@ -198,12 +198,55 @@
     return e;
   }
 
+  function isDailyQuota(e) { return !!(e && e.quota && e.quota.perDay); }
+
+  /* Google range le détail d'un dépassement dans error.details : le nom de
+     la quota dit s'il s'agit de la limite par minute ou de celle du jour,
+     et RetryInfo donne le délai exact. Sans ça, impossible de conseiller. */
+  function quotaInfo(j) {
+    var out = { perDay: false, perMinute: false, retry: 0, metric: '' };
+    var details = (j && j.error && j.error.details) || [];
+    details.forEach(function (d) {
+      var t = String(d['@type'] || '');
+      if (/QuotaFailure/i.test(t)) {
+        var v = (d.violations || [])[0] || {};
+        out.metric = String(v.quotaId || v.quotaMetric || '');
+        if (/PerDay/i.test(out.metric)) out.perDay = true;
+        if (/PerMinute/i.test(out.metric)) out.perMinute = true;
+      }
+      if (/RetryInfo/i.test(t)) {
+        var m = String(d.retryDelay || '').match(/([\d.]+)s/);
+        if (m) out.retry = Math.ceil(parseFloat(m[1]));
+      }
+    });
+    if (!out.perDay && !out.perMinute) {
+      var raw = JSON.stringify(details || []);
+      if (/PerDay/i.test(raw)) out.perDay = true;
+      else if (/PerMinute/i.test(raw)) out.perMinute = true;
+    }
+    return out;
+  }
+
   function buildError(res) {
-    var msg = '';
+    var msg = '', parsed = null;
     try {
-      var j = JSON.parse(res.text);
-      msg = (j.error && (j.error.message || j.error.type)) || '';
+      parsed = JSON.parse(res.text);
+      msg = (parsed.error && (parsed.error.message || parsed.error.type)) || '';
     } catch (e) { msg = (res.text || '').slice(0, 160); }
+
+    if (res.status === 429) {
+      var q = quotaInfo(parsed);
+      if (q.perDay) {
+        var e1 = new Error("Quota du jour épuisé pour ce modèle sur le palier gratuit. " +
+          "Il se remet à zéro vers 9 h, heure de Paris. En attendant, essaie un autre modèle " +
+          "dans les réglages : chacun a son propre compteur.");
+        e1.quota = q; return e1;
+      }
+      var wait = q.retry || 60;
+      var e2 = new Error("Limite par minute atteinte. Réessaie dans " + wait + " s." +
+        (q.metric ? ' (' + q.metric + ')' : ''));
+      e2.quota = q; return e2;
+    }
 
     if (res.status === 400 && /api key/i.test(msg)) {
       return new Error("Clé API refusée. Vérifie-la dans les réglages.");
@@ -211,9 +254,7 @@
     if (res.status === 401 || res.status === 403) {
       return new Error("Clé API refusée ou sans accès à ce modèle.");
     }
-    if (res.status === 429) {
-      return new Error("Limite du palier gratuit atteinte : trop de requêtes en une minute. Patiente un instant.");
-    }
+
     if (res.status === 404) {
       return new Error("Modèle introuvable. Change le nom du modèle dans les réglages.");
     }
@@ -523,7 +564,9 @@
         return autoPickModel(onStep).then(function () { return run(Store.getSettings()); });
       }).catch(function (e) {
         if (!e || e.code !== 429) throw e;
-        return waitFor(30, onStep).then(function () {
+        if (isDailyQuota(e)) throw e;          /* inutile d'attendre : c'est la journée */
+        var wait = (e.quota && e.quota.retry) || 30;
+        return waitFor(Math.min(wait + 3, 90), onStep).then(function () {
           onStep('Nouvelle tentative…');
           return run(Store.getSettings());
         });
@@ -586,6 +629,7 @@
     listModels: listModels,
     autoPickModel: autoPickModel,
     pickWorkingModel: pickWorkingModel, rememberBadModel: rememberBadModel,
+    isDailyQuota: isDailyQuota,
     bestModel: bestModel,
     compress: compress,
     toBets: toBets,

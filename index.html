@@ -278,6 +278,89 @@
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="sheet-host"></div>
 
+<script>
+/* Filet de sécurité : si un fichier manque ou plante, l'application reste
+   figée sans rien dire. Ce bloc affiche alors ce qui cloche, en clair,
+   sans dépendre de la feuille de style ni du reste du code. */
+(function () {
+  var firstError = null;
+  window.addEventListener('error', function (e) {
+    if (!firstError) {
+      firstError = (e.message || 'erreur') +
+        (e.filename ? ' — ' + String(e.filename).split('/').pop() + ':' + (e.lineno || '?') : '');
+    }
+  }, true);
+
+  var MODULES = [
+    ['model.js', 'Model'], ['store.js', 'Store'], ['stats.js', 'Stats'],
+    ['ai.js', 'AI'], ['ui.js', 'UI'], ['app.js', '__app']
+  ];
+
+  function diagnose() {
+    if (window.__appBooted) return;
+
+    var missing = [];
+    MODULES.forEach(function (m) { if (!window[m[1]]) missing.push(m[0]); });
+
+    var box = document.createElement('div');
+    box.setAttribute('style', [
+      'position:fixed', 'inset:0', 'z-index:9999', 'overflow:auto',
+      'background:#0E1116', 'color:#ECEFF3', 'padding:28px 20px',
+      'font-family:system-ui,-apple-system,sans-serif', 'font-size:15px', 'line-height:1.6'
+    ].join(';'));
+
+    var h = '<div style="max-width:520px;margin:0 auto">';
+    h += '<div style="font-size:22px;font-weight:800;margin-bottom:6px">L\'application n\'a pas démarré</div>';
+
+    if (missing.length) {
+      h += '<p style="color:#8B94A3;margin:0 0 18px">' +
+        (missing.length === 1 ? 'Un fichier manque sur le serveur' : missing.length + ' fichiers manquent sur le serveur') +
+        ' ou n\'a pas été remplacé correctement.</p>';
+      h += '<div style="background:#161A21;border:1px solid #3F2730;border-radius:16px;padding:16px">' +
+        '<div style="font-size:12px;font-weight:800;color:#FB7185;letter-spacing:.06em;margin-bottom:10px">À RENVOYER SUR GITHUB</div>' +
+        missing.map(function (f) {
+          return '<div style="font-family:ui-monospace,monospace;font-size:14px;padding:4px 0">' + f + '</div>';
+        }).join('') + '</div>';
+      h += '<p style="color:#8B94A3;margin:18px 0 0;font-size:13.5px">' +
+        'Renvoie ces fichiers, attends une minute, puis recharge avec Ctrl + F5.</p>';
+    } else {
+      h += '<p style="color:#8B94A3;margin:0 0 18px">Tous les fichiers sont présents, mais l\'un d\'eux a rencontré une erreur.</p>';
+    }
+
+    if (firstError) {
+      h += '<div style="background:#161A21;border:1px solid #242A34;border-radius:16px;padding:16px;margin-top:14px">' +
+        '<div style="font-size:12px;font-weight:800;color:#8B94A3;letter-spacing:.06em;margin-bottom:10px">DÉTAIL TECHNIQUE</div>' +
+        '<div style="font-family:ui-monospace,monospace;font-size:13px;color:#FBBF24;word-break:break-word">' +
+        String(firstError).replace(/[<>&]/g, '') + '</div></div>';
+    }
+
+    h += '<button type="button" id="diag-reload" style="width:100%;min-height:52px;margin-top:20px;border:none;' +
+      'border-radius:16px;background:#34D399;color:#0E1116;font-size:15px;font-weight:800;cursor:pointer">Recharger</button>';
+    h += '<button type="button" id="diag-sw" style="width:100%;min-height:48px;margin-top:10px;background:none;' +
+      'border:1px solid #242A34;border-radius:16px;color:#C2C9D4;font-size:13.5px;font-weight:700;cursor:pointer">' +
+      'Vider le cache de l\'application</button>';
+    h += '</div>';
+
+    box.innerHTML = h;
+    document.body.appendChild(box);
+
+    document.getElementById('diag-reload').onclick = function () { location.reload(); };
+    document.getElementById('diag-sw').onclick = function () {
+      var jobs = [];
+      if (window.caches) jobs.push(caches.keys().then(function (k) {
+        return Promise.all(k.map(function (n) { return caches.delete(n); }));
+      }));
+      if (navigator.serviceWorker) jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+        return Promise.all(rs.map(function (r) { return r.unregister(); }));
+      }));
+      Promise.all(jobs).catch(function () {}).then(function () { location.reload(true); });
+    };
+  }
+
+  window.addEventListener('load', function () { setTimeout(diagnose, 1200); });
+})();
+</script>
+
 <script src="model.js"></script>
 <script src="store.js"></script>
 <script src="stats.js"></script>

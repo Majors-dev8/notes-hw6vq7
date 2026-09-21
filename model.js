@@ -49,6 +49,17 @@
     return isFinite(n) ? n : (fallback === undefined ? null : fallback);
   }
 
+  /* Un numéro de ticket n'est unique que chez son opérateur : la clé
+     combine donc la plateforme et le numéro, débarrassé de sa ponctuation. */
+  function normRef(v) {
+    return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+
+  function betKey(bet) {
+    var r = normRef(bet && bet.ref);
+    return r ? (bet.platform || 'autre') + '#' + r : null;
+  }
+
   /* ---------- combinatoire ---------- */
 
   function choose(n, k) {
@@ -82,7 +93,9 @@
     var today = new Date();
     return {
       id: uid(),
+      ref: '',
       createdAt: today.toISOString(),
+      updatedAt: null,
       date: today.toISOString().slice(0, 10),
       platform: 'betclic',
       type: 'simple',
@@ -242,6 +255,66 @@
     return num(bet.stake, 0);
   }
 
+  /* ---------- fusion d'une capture avec un pari déjà enregistré ---------- */
+
+  /* Règle d'or : on ne fait qu'avancer. Un pari réglé ne redevient jamais
+     « en cours » parce qu'une vieille capture est réimportée. */
+  function mergeCapture(existing, incoming) {
+    var out = JSON.parse(JSON.stringify(existing));
+    var changes = [];
+
+    var pairs = matchSelections(out.selections || [], incoming.selections || []);
+    pairs.forEach(function (pair) {
+      var cur = pair.mine, ins = pair.theirs;
+      if (!cur || !ins) return;
+      if (cur.status === 'pending' && ins.status && ins.status !== 'pending') {
+        cur.status = ins.status;
+        changes.push((cur.event || 'Sélection') + ' : ' + (STATUS_LABEL[ins.status] || ins.status).toLowerCase());
+      }
+      if (!num(cur.odds, 0) && num(ins.odds, 0)) cur.odds = ins.odds;
+    });
+
+    if (existing.status === 'pending' && incoming.status && incoming.status !== 'pending') {
+      out.status = incoming.status;
+      out.manual = !!incoming.manual;
+      if (incoming.payout !== null && incoming.payout !== undefined) out.payout = incoming.payout;
+      changes.push('statut du pari : ' + (STATUS_LABEL[incoming.status] || incoming.status).toLowerCase());
+    }
+
+    /* la nouvelle capture peut compléter un pari saisi à la va-vite */
+    if (!num(out.stake, 0) && num(incoming.stake, 0)) { out.stake = incoming.stake; changes.push('mise complétée'); }
+    if (!num(out.oddsTotal, 0) && num(incoming.oddsTotal, 0)) out.oddsTotal = incoming.oddsTotal;
+    if (!out.ref && incoming.ref) out.ref = incoming.ref;
+
+    out.updatedAt = new Date().toISOString();
+    recompute(out);
+    return { bet: out, changes: changes };
+  }
+
+  /* Apparie les sélections : par position quand le compte correspond,
+     sinon par nom d'événement. */
+  function matchSelections(mine, theirs) {
+    if (mine.length === theirs.length) {
+      return mine.map(function (m, i) { return { mine: m, theirs: theirs[i] }; });
+    }
+    var used = {};
+    return mine.map(function (m) {
+      var key = normText(m.event);
+      var found = null;
+      for (var i = 0; i < theirs.length; i++) {
+        if (used[i]) continue;
+        if (key && normText(theirs[i].event) === key) { found = theirs[i]; used[i] = true; break; }
+      }
+      return { mine: m, theirs: found };
+    });
+  }
+
+  function normText(v) {
+    return String(v || '').toLowerCase().trim()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
   /* ---------- cohérence des données lues sur une capture ---------- */
 
   function checkConsistency(bet) {
@@ -278,12 +351,32 @@
   /* ---------- formatage ---------- */
 
   var hideAmounts = false;
-  function setPrivacy(v) { hideAmounts = !!v; }
+  var unitMode = false;
+  var unitValue = 10;
 
+  function setPrivacy(v) { hideAmounts = !!v; }
+  function setUnits(on, value) {
+    unitMode = !!on;
+    var n = num(value, 0);
+    if (n > 0) unitValue = n;
+  }
+  function getUnitValue() { return unitValue; }
+
+  /* Le même montant s'affiche en euros ou en unités selon le réglage.
+     Les cotes et les pourcentages ne changent pas : ce sont des ratios. */
   function fmtEur(v, opts) {
     if (v === null || v === undefined || isNaN(v)) return '—';
-    if (hideAmounts && !(opts && opts.force)) return '••• €';
+    if (hideAmounts && !(opts && opts.force)) return '•••';
     var sign = (opts && opts.signed && v > 0) ? '+' : '';
+
+    if (unitMode && unitValue > 0 && !(opts && opts.money)) {
+      var u = v / unitValue;
+      var dec = Math.abs(u) >= 100 ? 0 : (Math.abs(u) >= 10 ? 1 : 2);
+      return sign + new Intl.NumberFormat('fr-FR', {
+        minimumFractionDigits: dec, maximumFractionDigits: dec
+      }).format(u) + ' u';
+    }
+
     return sign + new Intl.NumberFormat('fr-FR', {
       style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2
     }).format(v);
@@ -345,8 +438,9 @@
     comboSize: comboSize, comboCount: comboCount,
     outcome: outcome, recompute: recompute,
     risk: risk, payoutOf: payoutOf, profit: profit, stakeForRoi: stakeForRoi,
-    checkConsistency: checkConsistency,
-    setPrivacy: setPrivacy,
+    checkConsistency: checkConsistency, mergeCapture: mergeCapture,
+    setPrivacy: setPrivacy, setUnits: setUnits, getUnitValue: getUnitValue,
+    normRef: normRef, betKey: betKey,
     fmtEur: fmtEur, fmtOdds: fmtOdds, fmtPct: fmtPct, fmtDate: fmtDate, relDay: relDay,
     typeLabel: typeLabel, platformLabel: platformLabel, oddsBucket: oddsBucket
   };

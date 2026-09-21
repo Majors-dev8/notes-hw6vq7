@@ -1494,8 +1494,18 @@
     }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-  else boot();
+  function safeBoot() {
+    try {
+      boot();
+      window.__appBooted = true;
+    } catch (e) {
+      console.error('Démarrage interrompu', e);
+      /* le bloc de diagnostic dans index.html prendra le relais */
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', safeBoot);
+  else safeBoot();
 
   window.__app = { state: state, go: go, openEditor: openEditor };
 })();

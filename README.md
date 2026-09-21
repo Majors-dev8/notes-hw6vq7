@@ -41,11 +41,10 @@ moteur de recherche.
    plutôt que `suivi-paris` — par exemple `notes-hw6vq7`. Le laisser
    **Public**. Créer.
 3. Sur la page du dépôt vide, cliquer sur **uploading an existing file**.
-4. Glisser **tout le contenu** de ce dossier : `index.html`, `app.css`, `sw.js`,
-   `manifest.webmanifest`, `README.md`, et les dossiers `js/` et `icons/`.
-   Important : déposer les fichiers eux-mêmes, pas le dossier qui les contient —
-   `index.html` doit se retrouver à la racine du dépôt.
-   (Le fichier `.nojekyll` est facultatif ; s'il ne se glisse pas, ce n'est pas grave.)
+4. Ouvrir le dossier, tout sélectionner (**Ctrl + A**) et glisser les fichiers
+   dans la zone de dépôt. Tous les fichiers vont à la racine, il n'y a aucun
+   sous-dossier à préserver : c'est voulu, ça évite les mauvaises surprises
+   avec le glisser-déposer de GitHub.
 5. Cliquer sur **Commit changes**.
 6. Aller dans **Settings → Pages**. Sous *Source*, choisir **Deploy from a branch**,
    branche `main`, dossier `/ (root)`. Enregistrer.
@@ -118,17 +117,20 @@ avec le marché qui revient le plus souvent.
 
 ## Structure
 
+Tous les fichiers sont à la racine, sans sous-dossier.
+
 ```
 index.html              écrans de l'application
 app.css                 thème sombre, tokens de couleur et composants
-js/model.js             modèle d'un pari, calculs de gains, formatage
-js/store.js             stockage local, export/import JSON et CSV
-js/stats.js             agrégations statistiques
-js/ai.js                lecture des captures (Gemini ou OpenRouter)
-js/ui.js                composants d'interface (courbe, listes, modales)
-js/app.js               navigation et écrans
+model.js                modèle d'un pari, calculs de gains, formatage
+store.js                stockage local, export/import JSON et CSV
+stats.js                agrégations statistiques
+ai.js                   lecture des captures (Gemini ou OpenRouter)
+ui.js                   composants d'interface (courbe, listes, modales)
+app.js                  navigation et écrans
 sw.js                   cache hors ligne et réception des captures partagées
 manifest.webmanifest    installation sur l'écran d'accueil
+icon-*.png, icon.svg    icônes de l'application
 ```
 
 ## Changer de fournisseur d'IA
