@@ -205,6 +205,9 @@
     if (res.status === 404) {
       return new Error("Modèle introuvable. Change le nom du modèle dans les réglages.");
     }
+    if (res.status === 400 && /interaction/i.test(msg)) {
+      return new Error("Ce modèle exige la nouvelle API de Google, que l'application n'utilise pas. Choisis-en un autre dans les réglages.");
+    }
     return new Error('Erreur ' + res.status + (msg ? ' · ' + msg : ''));
   }
 
@@ -406,18 +409,48 @@
     return ids.slice().sort(function (a, b) { return scoreModel(b) - scoreModel(a); })[0];
   }
 
-  /* Choisit et enregistre le meilleur modèle disponible. */
-  function autoPickModel() {
-    return listModels().then(function (ids) {
-      var best = bestModel(ids);
-      if (!best) throw new Error("Aucun modèle compatible n'est accessible avec cette clé.");
-      Store.setSetting('model', best);
-      return { model: best, models: ids };
-    });
+  /* Choisit et enregistre un modèle qui fonctionne réellement. */
+  function autoPickModel(onStep) {
+    return pickWorkingModel(onStep);
   }
 
-  function isMissingModel(e) {
-    return /introuvable|not found|404/i.test(e && e.message || '');
+  /* Deux cas se ressemblent du point de vue de l'application : le modèle n'existe
+     plus, ou il n'accepte plus la route que nous utilisons. Dans les deux cas,
+     il faut en essayer un autre. */
+  function isUnusableModel(e) {
+    var m = (e && e.message) || '';
+    return /introuvable|not found|404/i.test(m) || /exige la nouvelle API|interaction/i.test(m);
+  }
+
+  /* Essaie les meilleurs candidats l'un après l'autre et garde le premier qui
+     répond vraiment. Un nom bien classé ne garantit pas qu'il fonctionne. */
+  function pickWorkingModel(onStep) {
+    return listModels().then(function (ids) {
+      var ranked = ids.slice().sort(function (a, b) { return scoreModel(b) - scoreModel(a); }).slice(0, 8);
+      if (!ranked.length) throw new Error("Aucun modèle compatible n'est accessible avec cette clé.");
+      var base = Store.getSettings();
+      var i = 0, lastErr = null;
+
+      function attempt() {
+        if (i >= ranked.length) {
+          throw lastErr || new Error("Aucun des modèles de ta clé ne répond. Choisis-en un à la main dans les réglages.");
+        }
+        var id = ranked[i++];
+        if (onStep) onStep('Essai de ' + id + '…');
+        var cfg = {};
+        for (var k in base) cfg[k] = base[k];
+        cfg.model = id;
+        return pingModel(cfg).then(function () {
+          Store.setSetting('model', id);
+          return { model: id, models: ids };
+        }).catch(function (e) {
+          if (!isUnusableModel(e)) throw e;
+          lastErr = e;
+          return attempt();
+        });
+      }
+      return attempt();
+    });
   }
 
   /* ---------- API publique ---------- */
@@ -438,9 +471,9 @@
       }
 
       var p = run(cfg).catch(function (e) {
-        if (!isMissingModel(e) || cfg.provider === 'openrouter') throw e;
-        onStep('Modèle indisponible, recherche d\'un remplaçant…');
-        return autoPickModel().then(function () { return run(Store.getSettings()); });
+        if (!isUnusableModel(e) || cfg.provider === 'openrouter') throw e;
+        onStep("Modèle indisponible, recherche d'un remplaçant…");
+        return autoPickModel(onStep).then(function () { return run(Store.getSettings()); });
       });
 
       return p.then(function (txt) {
@@ -485,7 +518,7 @@
     return pingModel(cfg).then(function () {
       return { switched: false, model: cfg.model };
     }).catch(function (e) {
-      if (!isMissingModel(e)) throw e;
+      if (!isUnusableModel(e)) throw e;
       return autoPickModel().then(function (r) {
         return pingModel(Store.getSettings()).then(function () { return { switched: true, model: r.model }; });
       });
@@ -497,6 +530,7 @@
     testKey: testKey,
     listModels: listModels,
     autoPickModel: autoPickModel,
+    pickWorkingModel: pickWorkingModel,
     bestModel: bestModel,
     compress: compress,
     toBets: toBets,

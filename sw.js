@@ -1,6 +1,6 @@
 /* Service worker — mise en cache de l'application et réception des captures partagées */
 
-var CACHE = 'suivi-paris-v3';
+var CACHE = 'suivi-paris-v4';
 var SHARE_CACHE = 'sp-share';
 
 var ASSETS = [

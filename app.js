@@ -935,7 +935,7 @@
       st.textContent = 'Test en cours…'; st.className = 'hint'; st.style.color = '';
       AI.testKey().then(function (r) {
         st.textContent = r.switched
-          ? 'Clé valide. Modèle choisi automatiquement : ' + r.model + '.'
+          ? 'Clé valide. Modèle retenu après essai : ' + r.model + '.'
           : 'Clé valide. La lecture des captures est opérationnelle.';
         st.className = 'hint'; st.style.color = 'var(--green)';
         renderSettings();
@@ -1027,11 +1027,18 @@
         hint.className = 'hint warn';
         return;
       }
-      if (!Store.getSettings().model) {
-        Store.setSetting('model', AI.bestModel(ids));
-        renderSettings();
-      }
       paintModelList(ids);
+      if (!Store.getSettings().model) {
+        hint.textContent = 'Recherche du modèle qui fonctionne…';
+        AI.pickWorkingModel(function (msg) { hint.textContent = msg; }).then(function (r) {
+          renderSettings();
+          paintModelList(ids);
+          UI.toast('Modèle retenu : ' + r.model);
+        }).catch(function (e) {
+          hint.textContent = e.message;
+          hint.className = 'hint warn';
+        });
+      }
     }).catch(function (e) {
       box.innerHTML = '';
       hint.textContent = e.message;
@@ -1041,21 +1048,18 @@
 
   function paintModelList(ids) {
     var cur = Store.getSettings().model;
-    var best = AI.bestModel(ids);
     /* on n'affiche que les candidats sérieux, pour ne pas noyer l'écran */
-    var shown = ids.slice().sort(function (a, b) {
-      return (a === cur ? -1 : 0) || 0;
-    }).filter(function (id) { return /flash|pro/.test(id); }).slice(0, 8);
-    if (shown.indexOf(cur) < 0 && cur) shown.unshift(cur);
+    var shown = ids.filter(function (id) { return /flash|pro/.test(id); }).slice(0, 8);
+    if (cur && shown.indexOf(cur) < 0) shown.unshift(cur);
 
     document.getElementById('model-list').innerHTML = shown.map(function (id) {
       return '<button type="button" class="chip' + (id === cur ? ' on' : '') +
-        '" data-model="' + esc(id) + '">' + esc(id) + (id === best ? ' ★' : '') + '</button>';
+        '" data-model="' + esc(id) + '">' + esc(id) + '</button>';
     }).join('');
 
     var hint = document.getElementById('model-hint');
     hint.className = 'hint';
-    hint.textContent = ids.length + ' modèles disponibles · ★ = recommandé pour lire des captures';
+    hint.textContent = ids.length + ' modèles disponibles · appuie sur un nom pour en changer';
   }
 
   /* =========================================================
