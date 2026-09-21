@@ -133,7 +133,7 @@
     };
     if (useSchema) body.generationConfig.responseSchema = SCHEMA;
 
-    return fetch(geminiUrl(cfg.model || 'gemini-2.5-flash', cfg.apiKey), {
+    return fetch(geminiUrl(cfg.model, cfg.apiKey), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -341,6 +341,85 @@
     return out;
   }
 
+  /* ---------- découverte des modèles disponibles sur la clé ---------- */
+
+  /* Le catalogue Google change souvent : plutôt que de figer un nom de modèle,
+     on demande à la clé ce qu'elle peut utiliser et on choisit le meilleur. */
+
+  var EXCLUDE = /embedding|imagen|veo|:?image|tts|audio|aqa|learnlm|gemma/i;
+
+  function listModels() {
+    var cfg = Store.getSettings();
+    if (!cfg.apiKey) return Promise.reject(new Error('Ajoute une clé avant de détecter les modèles.'));
+
+    if (cfg.provider === 'openrouter') {
+      return fetch('https://openrouter.ai/api/v1/models', {
+        headers: { 'Authorization': 'Bearer ' + cfg.apiKey }
+      }).then(readJson).then(function (data) {
+        return (data.data || [])
+          .filter(function (m) {
+            var mods = (m.architecture && m.architecture.input_modalities) || [];
+            return mods.indexOf('image') >= 0;
+          })
+          .map(function (m) { return m.id; });
+      });
+    }
+
+    return fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' +
+                 encodeURIComponent(cfg.apiKey) + '&pageSize=200')
+      .then(readJson).then(function (data) {
+        return (data.models || [])
+          .filter(function (m) {
+            var methods = m.supportedGenerationMethods || m.supported_generation_methods || [];
+            return methods.indexOf('generateContent') >= 0;
+          })
+          .map(function (m) { return String(m.name || '').replace(/^models\//, ''); })
+          .filter(function (id) { return id && !EXCLUDE.test(id); });
+      });
+  }
+
+  function readJson(r) {
+    return r.text().then(function (t) {
+      if (!r.ok) throw httpError({ status: r.status, text: t });
+      try { return JSON.parse(t); } catch (e) { throw new Error('Réponse inattendue du fournisseur.'); }
+    });
+  }
+
+  /* Un modèle « flash » récent est le bon compromis pour lire une capture :
+     rapide, multimodal, et présent sur le palier gratuit. */
+  function scoreModel(id) {
+    var n = id.toLowerCase();
+    var v = 0;
+    var m = n.match(/(\d+(?:\.\d+)?)/);
+    if (m) v = parseFloat(m[1]) || 0;
+    var score = v * 10;
+    if (/flash/.test(n)) score += 30;
+    else if (/pro/.test(n)) score += 8;      /* souvent payant */
+    if (/lite/.test(n)) score -= 8;
+    if (/preview|exp|thinking/.test(n)) score -= 5;
+    if (/latest/.test(n)) score += 1;
+    return score;
+  }
+
+  function bestModel(ids) {
+    if (!ids || !ids.length) return null;
+    return ids.slice().sort(function (a, b) { return scoreModel(b) - scoreModel(a); })[0];
+  }
+
+  /* Choisit et enregistre le meilleur modèle disponible. */
+  function autoPickModel() {
+    return listModels().then(function (ids) {
+      var best = bestModel(ids);
+      if (!best) throw new Error("Aucun modèle compatible n'est accessible avec cette clé.");
+      Store.setSetting('model', best);
+      return { model: best, models: ids };
+    });
+  }
+
+  function isMissingModel(e) {
+    return /introuvable|not found|404/i.test(e && e.message || '');
+  }
+
   /* ---------- API publique ---------- */
 
   function readScreenshot(file, onStep) {
@@ -353,7 +432,17 @@
 
     return compress(file).then(function (img) {
       onStep('Lecture par le modèle…');
-      var p = cfg.provider === 'openrouter' ? callOpenRouter(img, cfg) : callGemini(img, cfg, true);
+
+      function run(c) {
+        return c.provider === 'openrouter' ? callOpenRouter(img, c) : callGemini(img, c, true);
+      }
+
+      var p = run(cfg).catch(function (e) {
+        if (!isMissingModel(e) || cfg.provider === 'openrouter') throw e;
+        onStep('Modèle indisponible, recherche d\'un remplaçant…');
+        return autoPickModel().then(function () { return run(Store.getSettings()); });
+      });
+
       return p.then(function (txt) {
         onStep('Mise en forme…');
         Store.bumpQuota();
@@ -364,9 +453,7 @@
     });
   }
 
-  function testKey() {
-    var cfg = Store.getSettings();
-    if (!cfg.apiKey) return Promise.reject(new Error('Ajoute une clé avant de tester.'));
+  function pingModel(cfg) {
     if (cfg.provider === 'openrouter') {
       return fetch('https://openrouter.ai/api/v1/models', {
         headers: { 'Authorization': 'Bearer ' + cfg.apiKey }
@@ -375,7 +462,7 @@
         return true;
       });
     }
-    return fetch(geminiUrl(cfg.model || 'gemini-2.5-flash', cfg.apiKey), {
+    return fetch(geminiUrl(cfg.model, cfg.apiKey), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'ok' }] }] })
@@ -385,9 +472,32 @@
     });
   }
 
+  /* Teste la clé. Si le modèle enregistré n'existe plus, en choisit un autre
+     tout seul et réessaie : c'est le cas le plus fréquent, le catalogue bouge. */
+  function testKey() {
+    var cfg = Store.getSettings();
+    if (!cfg.apiKey) return Promise.reject(new Error('Ajoute une clé avant de tester.'));
+    if (!cfg.model) {
+      return autoPickModel().then(function (r) {
+        return pingModel(Store.getSettings()).then(function () { return { switched: true, model: r.model }; });
+      });
+    }
+    return pingModel(cfg).then(function () {
+      return { switched: false, model: cfg.model };
+    }).catch(function (e) {
+      if (!isMissingModel(e)) throw e;
+      return autoPickModel().then(function (r) {
+        return pingModel(Store.getSettings()).then(function () { return { switched: true, model: r.model }; });
+      });
+    });
+  }
+
   global.AI = {
     readScreenshot: readScreenshot,
     testKey: testKey,
+    listModels: listModels,
+    autoPickModel: autoPickModel,
+    bestModel: bestModel,
     compress: compress,
     toBets: toBets,
     parseJson: parseJson,

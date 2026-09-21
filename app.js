@@ -64,7 +64,7 @@
       case 'home': renderHome(); break;
       case 'history': renderHistory(); break;
       case 'stats': renderStats(); break;
-      case 'settings': renderSettings(); break;
+      case 'settings': renderSettings(); maybeAutoDetect(); break;
       case 'review': renderReview(); break;
       case 'detail': renderDetail(); break;
       case 'import': renderImport(); break;
@@ -893,35 +893,70 @@
     });
   }
 
+  /* première ouverture des réglages avec une clé mais sans modèle : on détecte */
+  function maybeAutoDetect() {
+    var cfg = Store.getSettings();
+    if (cfg.apiKey && !cfg.model) loadModelList();
+    else if (cfg.apiKey && modelCache) paintModelList(modelCache);
+  }
+
   function wireSettings() {
+    var keyTimer;
     document.getElementById('apikey').addEventListener('input', function () {
       Store.setSetting('apiKey', this.value.trim());
-      document.getElementById('key-state').textContent = 'Clé enregistrée sur cet appareil.';
-      document.getElementById('key-state').className = 'hint';
+      var st = document.getElementById('key-state');
+      st.textContent = 'Clé enregistrée sur cet appareil.';
+      st.className = 'hint'; st.style.color = '';
+      modelCache = null;
+      clearTimeout(keyTimer);
+      keyTimer = setTimeout(function () {
+        if (Store.getSettings().apiKey.length > 20) loadModelList(true);
+      }, 900);
     });
     document.getElementById('model').addEventListener('input', function () {
       Store.setSetting('model', this.value.trim());
     });
     document.getElementById('prov-gemini').addEventListener('click', function () {
       Store.setSetting('provider', 'gemini');
-      Store.setSetting('model', 'gemini-2.5-flash');
+      Store.setSetting('model', '');
+      modelCache = null;
       renderSettings();
+      loadModelList();
     });
     document.getElementById('prov-openrouter').addEventListener('click', function () {
       Store.setSetting('provider', 'openrouter');
-      Store.setSetting('model', 'google/gemini-2.0-flash-exp:free');
+      Store.setSetting('model', '');
+      modelCache = null;
       renderSettings();
+      loadModelList();
     });
     document.getElementById('test-key').addEventListener('click', function () {
       var st = document.getElementById('key-state');
-      st.textContent = 'Test en cours…'; st.className = 'hint';
-      AI.testKey().then(function () {
-        st.textContent = 'Clé valide. La lecture des captures est opérationnelle.';
+      st.textContent = 'Test en cours…'; st.className = 'hint'; st.style.color = '';
+      AI.testKey().then(function (r) {
+        st.textContent = r.switched
+          ? 'Clé valide. Modèle choisi automatiquement : ' + r.model + '.'
+          : 'Clé valide. La lecture des captures est opérationnelle.';
         st.className = 'hint'; st.style.color = 'var(--green)';
+        renderSettings();
+        if (r.switched) loadModelList();
       }).catch(function (e) {
         st.textContent = e.message;
         st.className = 'hint warn'; st.style.color = '';
       });
+    });
+
+    document.getElementById('detect-model').addEventListener('click', function () {
+      loadModelList(true);
+    });
+
+    document.getElementById('model-list').addEventListener('click', function (e) {
+      var c = e.target.closest('[data-model]');
+      if (!c) return;
+      Store.setSetting('model', c.getAttribute('data-model'));
+      renderSettings();
+      loadModelList();
+      UI.toast('Modèle : ' + c.getAttribute('data-model'));
     });
     document.getElementById('opt-freebet').addEventListener('click', function () {
       var v = this.getAttribute('aria-checked') !== 'true';
@@ -967,6 +1002,60 @@
           renderSettings();
         });
     });
+  }
+
+  /* Liste les modèles accessibles avec la clé et les propose en pastilles. */
+  var modelCache = null;
+
+  function loadModelList(force) {
+    var hint = document.getElementById('model-hint');
+    var box = document.getElementById('model-list');
+    if (!Store.getSettings().apiKey) {
+      box.innerHTML = '';
+      hint.textContent = 'Ajoute une clé, puis appuie sur Détecter.';
+      hint.className = 'hint';
+      return;
+    }
+    if (modelCache && !force) { paintModelList(modelCache); return; }
+
+    hint.textContent = 'Recherche des modèles disponibles…';
+    hint.className = 'hint';
+    AI.listModels().then(function (ids) {
+      modelCache = ids;
+      if (!ids.length) {
+        hint.textContent = "Aucun modèle compatible n'est accessible avec cette clé.";
+        hint.className = 'hint warn';
+        return;
+      }
+      if (!Store.getSettings().model) {
+        Store.setSetting('model', AI.bestModel(ids));
+        renderSettings();
+      }
+      paintModelList(ids);
+    }).catch(function (e) {
+      box.innerHTML = '';
+      hint.textContent = e.message;
+      hint.className = 'hint warn';
+    });
+  }
+
+  function paintModelList(ids) {
+    var cur = Store.getSettings().model;
+    var best = AI.bestModel(ids);
+    /* on n'affiche que les candidats sérieux, pour ne pas noyer l'écran */
+    var shown = ids.slice().sort(function (a, b) {
+      return (a === cur ? -1 : 0) || 0;
+    }).filter(function (id) { return /flash|pro/.test(id); }).slice(0, 8);
+    if (shown.indexOf(cur) < 0 && cur) shown.unshift(cur);
+
+    document.getElementById('model-list').innerHTML = shown.map(function (id) {
+      return '<button type="button" class="chip' + (id === cur ? ' on' : '') +
+        '" data-model="' + esc(id) + '">' + esc(id) + (id === best ? ' ★' : '') + '</button>';
+    }).join('');
+
+    var hint = document.getElementById('model-hint');
+    hint.className = 'hint';
+    hint.textContent = ids.length + ' modèles disponibles · ★ = recommandé pour lire des captures';
   }
 
   /* =========================================================

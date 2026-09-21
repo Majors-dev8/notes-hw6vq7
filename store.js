@@ -11,7 +11,7 @@
   var DEFAULT_SETTINGS = {
     provider: 'gemini',
     apiKey: '',
-    model: 'gemini-2.5-flash',
+    model: '',
     excludeFreebets: true,
     privacy: false,
     quotaDay: '',
