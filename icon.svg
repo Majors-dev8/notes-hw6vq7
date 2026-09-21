@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Suivi Paris">
+  <rect width="512" height="512" rx="123" fill="#0E1116"/>
+  <line x1="118" y1="389" x2="394" y2="389" stroke="#2B3441" stroke-width="8"/>
+  <polyline points="118,322 170,283 214,308 267,228 312,253 356,178 394,145"
+            fill="none" stroke="#34D399" stroke-width="28"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="394" cy="145" r="27" fill="#34D399"/>
+</svg>

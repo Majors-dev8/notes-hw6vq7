@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1116">
+<meta name="description" content="Suivi de paris sportifs : import par capture d'écran, bilan et statistiques.">
+<title>Suivi Paris</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Suivi Paris">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- ======================= ACCUEIL ======================= -->
+<section id="s-home" class="screen active">
+  <header class="head">
+    <div>
+      <div class="eyebrow" id="home-period">Ce mois-ci</div>
+      <h1>Mon suivi</h1>
+    </div>
+    <a class="icon-btn" href="#settings" aria-label="Réglages">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h8M17.5 8h2.5M4 16h3.5M13 16h7"/><circle cx="14.5" cy="8" r="2.3"/><circle cx="10" cy="16" r="2.3"/></svg>
+    </a>
+  </header>
+
+  <section class="card" style="margin-top:6px">
+    <div class="row-between">
+      <span style="font-size:12px;color:var(--muted);font-weight:700">Bénéfice net · <span id="home-range">30 jours</span></span>
+      <span style="font-size:11px;color:var(--muted);font-weight:600" id="home-count">—</span>
+    </div>
+    <div class="balance num" id="home-profit">—</div>
+    <div id="home-spark"></div>
+    <div class="kpis">
+      <div><div class="k">Misé</div><div class="v num" id="home-staked">—</div></div>
+      <div><div class="k">ROI</div><div class="v num" id="home-roi">—</div></div>
+      <div><div class="k">Réussite</div><div class="v num" id="home-hit">—</div></div>
+    </div>
+  </section>
+
+  <div class="chips" id="home-filters"></div>
+
+  <div class="list" id="home-pending-wrap">
+    <div class="day-head"><span class="d">En cours</span><span class="s mut" id="home-pending-sum"></span></div>
+    <div id="home-pending"></div>
+  </div>
+
+  <div class="list" id="home-recent-wrap">
+    <div class="day-head"><span class="d">Terminés</span><a href="#history" style="font-size:12px;font-weight:700;text-decoration:none">Tout voir</a></div>
+    <div id="home-recent"></div>
+  </div>
+
+  <div id="home-empty" class="empty hidden">
+    <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5h4L8.5 6h7L17 8.5h4v11H3z"/><circle cx="12" cy="13.6" r="3.4"/></svg>
+    <p>Aucun pari enregistré.<br>Appuie sur <b>+</b> et dépose une capture d'écran de ton ticket.</p>
+  </div>
+</section>
+
+<!-- ======================= IMPORT ======================= -->
+<section id="s-import" class="screen">
+  <header class="head">
+    <a class="icon-btn" href="#home" aria-label="Retour">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5 8 12l6.5 7"/></svg>
+    </a>
+    <div style="flex:1 1 auto"><h1 class="sm">Ajouter un pari</h1></div>
+  </header>
+
+  <button type="button" class="drop" id="drop">
+    <span class="ic">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5h4L8.5 6h7L17 8.5h4v11H3z"/><circle cx="12" cy="13.6" r="3.4"/></svg>
+    </span>
+    <span class="t">Déposer une capture</span>
+    <span class="s">Galerie, photo ou partage depuis l'appli<br>Plusieurs paris sur la même image : c'est géré</span>
+  </button>
+  <input type="file" id="file" accept="image/*" multiple class="hidden">
+
+  <div class="or"><span></span><b>OU</b><span></span></div>
+  <div style="padding:0 16px">
+    <button type="button" class="btn ghost" id="go-manual">Saisie manuelle</button>
+  </div>
+
+  <div class="card tight hidden" id="ocr-progress" style="margin-top:18px">
+    <div style="display:flex;gap:12px;align-items:center">
+      <img class="thumb" id="ocr-thumb" alt="Aperçu de la capture importée">
+      <div style="flex:1 1 auto;min-width:0">
+        <div style="font-size:14px;font-weight:800" id="ocr-title">Lecture de l'image…</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px" id="ocr-file">—</div>
+        <div class="bar indet"><i></i></div>
+        <div style="font-size:11px;color:var(--muted);font-weight:600;margin-top:7px" id="ocr-step">Envoi au modèle…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card hidden note red" id="ocr-error" style="margin-top:12px;display:none"></div>
+</section>
+
+<!-- ======================= VALIDATION ======================= -->
+<section id="s-review" class="screen">
+  <header class="head">
+    <a class="icon-btn" href="#import" aria-label="Retour">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5 8 12l6.5 7"/></svg>
+    </a>
+    <div style="flex:1 1 auto"><h1 class="sm" id="review-title">Vérifier</h1></div>
+    <span style="font-size:12px;font-weight:700;color:var(--muted)" id="review-count"></span>
+  </header>
+  <div id="review-body"></div>
+  <div class="actionbar" id="review-bar"></div>
+</section>
+
+<!-- ======================= DÉTAIL ======================= -->
+<section id="s-detail" class="screen">
+  <header class="head">
+    <a class="icon-btn" id="detail-back" href="#home" aria-label="Retour">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5 8 12l6.5 7"/></svg>
+    </a>
+    <div style="flex:1 1 auto;min-width:0">
+      <h1 class="sm" id="detail-title">—</h1>
+      <div class="sub" id="detail-sub">—</div>
+    </div>
+    <span class="pill" id="detail-status">—</span>
+  </header>
+  <div id="detail-body"></div>
+  <div class="actionbar" id="detail-bar"></div>
+</section>
+
+<!-- ======================= HISTORIQUE ======================= -->
+<section id="s-history" class="screen">
+  <header class="head">
+    <div><h1>Historique</h1></div>
+    <button type="button" class="icon-btn" id="hist-reset" aria-label="Réinitialiser les filtres">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h16M7 12h10M10 17h4"/></svg>
+    </button>
+  </header>
+  <div class="chips" id="hist-filters"></div>
+  <div class="card tight row-between" style="margin-top:12px">
+    <span style="font-size:12.5px;color:var(--muted);font-weight:700" id="hist-count">—</span>
+    <span class="num" style="font-size:16px;font-weight:700" id="hist-profit">—</span>
+  </div>
+  <div class="list" id="hist-list"></div>
+</section>
+
+<!-- ======================= STATS ======================= -->
+<section id="s-stats" class="screen">
+  <header class="head">
+    <div><h1>Statistiques</h1></div>
+    <button type="button" class="chip on" id="stats-range">30 j</button>
+  </header>
+  <div class="tabs" id="stats-tabs">
+    <button type="button" data-tab="overview" aria-selected="true">Vue d'ensemble</button>
+    <button type="button" data-tab="sports" aria-selected="false">Sports</button>
+    <button type="button" data-tab="odds" aria-selected="false">Cotes</button>
+  </div>
+  <div id="stats-body"></div>
+</section>
+
+<!-- ======================= RÉGLAGES ======================= -->
+<section id="s-settings" class="screen">
+  <header class="head"><div><h1>Réglages</h1></div></header>
+
+  <div class="sec-title">LECTURE DES CAPTURES</div>
+  <div class="card" style="padding:6px">
+    <button type="button" class="opt-row" id="prov-gemini" style="width:100%;background:none;border:none;color:inherit;border-radius:15px;cursor:pointer;text-align:left">
+      <span class="dotr" aria-hidden="true"></span>
+      <span class="mid"><span class="t1">Gemini Flash</span><span class="t2">Palier gratuit Google AI Studio · sans carte bancaire</span></span>
+    </button>
+    <button type="button" class="opt-row" id="prov-openrouter" style="width:100%;background:none;border:none;color:inherit;border-radius:15px;cursor:pointer;text-align:left">
+      <span class="dotr" aria-hidden="true"></span>
+      <span class="mid"><span class="t1">OpenRouter</span><span class="t2">Autre fournisseur · modèle de vision au choix</span></span>
+    </button>
+  </div>
+
+  <div class="card" style="margin-top:10px">
+    <div class="field" style="margin-top:0">
+      <label for="apikey">CLÉ API</label>
+      <div style="display:flex;gap:8px">
+        <input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="Colle ta clé ici" style="flex:1 1 auto">
+        <button type="button" class="btn sm" id="test-key" style="flex:0 0 96px;margin-top:6px">Tester</button>
+      </div>
+      <div class="hint" id="key-state">La clé reste sur cet appareil, dans le stockage du navigateur.</div>
+    </div>
+    <div class="field" id="model-field">
+      <label for="model">MODÈLE</label>
+      <input id="model" type="text" spellcheck="false">
+      <div class="hint">Laisse tel quel si tu ne sais pas quoi mettre.</div>
+    </div>
+    <div class="row-between" style="margin-top:14px;border-top:1px solid var(--border);padding-top:11px">
+      <span style="font-size:12px;color:var(--muted);font-weight:700">Captures lues aujourd'hui</span>
+      <span class="num" style="font-size:13px;font-weight:700" id="quota-today">0</span>
+    </div>
+  </div>
+
+  <div class="sec-title">CALCUL DU BILAN</div>
+  <div class="card" style="padding:0">
+    <div class="opt-row">
+      <span class="mid"><span class="t1">Exclure les freebets du ROI</span><span class="t2">La mise offerte n'est pas comptée comme perdue</span></span>
+      <button type="button" class="switch" role="switch" id="opt-freebet" aria-checked="true" aria-label="Exclure les freebets du ROI"><span></span></button>
+    </div>
+    <div class="opt-row">
+      <span class="mid"><span class="t1">Masquer les montants</span><span class="t2">Remplace les sommes par des points</span></span>
+      <button type="button" class="switch" role="switch" id="opt-privacy" aria-checked="false" aria-label="Masquer les montants"><span></span></button>
+    </div>
+  </div>
+
+  <div class="sec-title">MES DONNÉES</div>
+  <div style="padding:0 16px">
+    <div class="btn-row">
+      <button type="button" class="btn ghost" id="exp-json">Exporter</button>
+      <button type="button" class="btn ghost" id="imp-json">Importer</button>
+      <button type="button" class="btn ghost" id="exp-csv">CSV</button>
+    </div>
+    <input type="file" id="imp-file" accept="application/json,.json" class="hidden">
+    <button type="button" class="btn ghost" id="wipe" style="margin-top:10px;color:var(--red)">Tout effacer</button>
+    <p style="font-size:11.5px;color:var(--muted);line-height:1.6;margin:14px 2px 0">
+      Les paris sont enregistrés uniquement dans ce navigateur. Pense à exporter de temps en temps,
+      et pour changer d'appareil.
+    </p>
+    <p style="font-size:11px;color:var(--muted);margin:10px 2px 0" id="version-line"></p>
+  </div>
+</section>
+
+<!-- ======================= NAVIGATION ======================= -->
+<nav class="tabbar" id="tabbar">
+  <a href="#home" data-nav="home" class="on">
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.8 9.6V20h12.4V9.6"/></svg>
+    <span>Accueil</span>
+  </a>
+  <a href="#history" data-nav="history">
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.2l3.2 2"/></svg>
+    <span>Historique</span>
+  </a>
+  <a href="#import" data-nav="import" class="fab" aria-label="Ajouter un pari">
+    <i><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5.5v13M5.5 12h13"/></svg></i>
+  </a>
+  <a href="#stats" data-nav="stats">
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4.5 19.5V12M10 19.5V5M15.5 19.5v-5.5M21 19.5V9"/></svg>
+    <span>Stats</span>
+  </a>
+  <a href="#settings" data-nav="settings">
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h8M17.5 8h2.5M4 16h3.5M13 16h7"/><circle cx="14.5" cy="8" r="2.3"/><circle cx="10" cy="16" r="2.3"/></svg>
+    <span>Réglages</span>
+  </a>
+</nav>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="sheet-host"></div>
+
+<script src="js/model.js"></script>
+<script src="js/store.js"></script>
+<script src="js/stats.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
